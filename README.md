@@ -1,27 +1,27 @@
 # SecurityLock
 
-Windows kompüterini iki yolla dərhal kilidləyən kiçik arxa plan proqramı (Rust):
+A tiny background app (Rust) that instantly locks your Windows PC in two ways:
 
-1. **Panika küncü:** siçan kursorunu ekranın **sağ aşağı küncünə sürətlə çırpanda** kompüter kilidlənir. Normal sürətlə küncə getmək kilidləmir.
-2. **iPhone-dan uzaqdan kilid:** iPhone Shortcuts-dan bir toxunuşla, Wi-Fi və ya mobil internet fərqi olmadan. VPN lazım deyil.
+1. **Panic corner:** slam the mouse cursor into the **bottom-right corner** of the screen and the PC locks. Moving to the corner at normal speed does nothing.
+2. **Remote lock from an iPhone:** one tap in the Shortcuts app, on any network (home Wi-Fi, mobile data, anywhere). No VPN required.
 
-Proqram resursu az işlədir: təxminən 10 MB RAM, boş vaxtda CPU demək olar ki, 0. Aşağı prioritetlə işləyir, konsol pəncərəsi açmır və kompüterdə **heç bir port açmır**.
+It is lightweight: about 10 MB of RAM and near-zero CPU when idle. It runs at below-normal priority, opens no console window, and **opens no ports** on your computer.
 
-> Proqram yalnız **kilidləyir**. Kompüteri açmaq və ya başqa əmr icra etmək mümkün deyil.
+> The app can only **lock** the machine. It cannot unlock it or run any other command.
 
-## Necə işləyir
+## How it works
 
-Uzaqdan kilid [ntfy.sh](https://ntfy.sh) pulsuz mesaj servisi ilə işləyir:
+Remote locking uses the free [ntfy.sh](https://ntfy.sh) pub/sub service:
 
+```text
+iPhone Shortcut --HTTPS--> ntfy.sh <--HTTPS (outbound)-- Windows app --> lock
 ```
-iPhone Shortcut --HTTPS--> ntfy.sh <--HTTPS (çıxan bağlantı)-- Windows proqramı --> kilid
-```
 
-Proqram təsadüfi gizli kanalı dinləyir. Kanala `lock` mesajı gələndə Windows kilidlənir. Router ayarı və ya port yönləndirmə lazım deyil.
+The app listens on a random, secret topic. When a `lock` message arrives on it, Windows locks. No router configuration or port forwarding is needed.
 
-## Quraşdırma (Windows)
+## Install (Windows)
 
-Rust ([rustup.rs](https://rustup.rs)) lazımdır.
+Requires Rust ([rustup.rs](https://rustup.rs)).
 
 ```powershell
 git clone <repo-url>
@@ -29,11 +29,11 @@ cd SecurityLock
 cargo build --release
 ```
 
-Hazır proqram `target\release\win_iphone_guard.exe` ünvanında yaranır.
+The binary is created at `target\release\win_iphone_guard.exe`.
 
-### Avtomatik başlama
+### Start automatically at login
 
-PowerShell-də (exe-ni sabit qovluğa köçürür və Windows açılanda işə salır):
+In PowerShell (copies the exe to a fixed folder and adds a Startup shortcut):
 
 ```powershell
 $dir = Join-Path $env:LOCALAPPDATA 'SecurityLock'
@@ -48,51 +48,55 @@ $s.TargetPath = $exe; $s.WorkingDirectory = $dir; $s.WindowStyle = 7; $s.Save()
 Start-Process $exe
 ```
 
-İlk işə düşəndə `ntfy_topic.txt` faylı yaranır. Gizli kanal adınız budur:
+On first run the app creates `ntfy_topic.txt` next to the exe. Its content is your secret topic:
 
 ```powershell
 Get-Content "$env:LOCALAPPDATA\SecurityLock\ntfy_topic.txt"
 ```
 
-Proqramı dayandırmaq üçün Task Manager-də `win_iphone_guard.exe` prosesini bitirin.
+To stop the app, end the `win_iphone_guard.exe` process in Task Manager.
 
 ## iPhone Shortcut
 
-1. **Shortcuts** → yeni shortcut → **Get Contents of URL** əməliyyatı.
-2. URL (method **GET**, body yoxdur):
-   ```
-   https://ntfy.sh/<SİZİN-KANAL-ADI>/publish?message=lock
-   ```
-3. Ana ekrana əlavə edin və ya **Action Button** / **Back Tap** ilə bağlayın.
-4. Avtomatik kilid üçün: **Automation → Leave** (məkandan çıxanda) → shortcut-u **Run Immediately** ilə işə salın.
+1. Open **Shortcuts** → create a new shortcut → add the **Get Contents of URL** action.
+2. Set the URL (method **GET**, no body):
 
-Mesaj bir neçə saniyəyə çatır.
+   ```text
+   https://ntfy.sh/<YOUR-SECRET-TOPIC>/publish?message=lock
+   ```
+
+3. Add it to the Home Screen, or bind it to the **Action Button** or **Back Tap**.
+4. For automatic locking: **Automation → Leave** (when you leave a location) → run the shortcut with **Run Immediately**.
+
+The message usually arrives within a few seconds.
 
 ## macOS
 
-Mac üçün Rust lazım deyil: [mac/](mac/) qovluğunda kiçik skript var. `bash mac/install.sh` işlədin, o təsadüfi kanal yaradır, Mac açılanda işləyən xidmət qurur və iPhone üçün linki göstərir. Mac-də **System Settings → Lock Screen → Require password → Immediately** olmalıdır.
+The Mac version needs no Rust: it is a small shell script in [mac/](mac/). Run `bash mac/install.sh`. It generates a random topic, installs a LaunchAgent that starts at login, and prints the URL for your iPhone Shortcut. On the Mac, set **System Settings → Lock Screen → Require password → Immediately**.
 
-## Təhlükəsizlik
+> The macOS scripts have not been tested on a real Mac yet.
 
-- Kanal adı 128 bitlik təsadüfi dəyərdir. **Gizli saxlayın**, o, kompüteri kilidləmək açarıdır.
-- Linki bilən şəxs yalnız kompüteri **kilidləyə** bilər, daha heç nə. Proqram yalnız dəqiq `lock` mətnini tanıyır.
-- 120 saniyədən köhnə mesajlar rədd edilir.
-- Mesajlar üçüncü tərəf serveri olan ntfy.sh-dan keçir (HTTPS ilə). Daha yüksək məxfilik üçün öz ntfy serverinizi qura və `src/main.rs`-dəki `NTFY_SERVER` sabitini dəyişə bilərsiniz.
-- Link sızsa: `ntfy_topic.txt` faylını silib proqramı yenidən başladın, yeni kanal yaranacaq, Shortcut-da linki yeniləyin.
+## Security
 
-## Tənzimləmələr
+- The topic is a 128-bit random value. **Keep it secret**: it is the key that triggers the lock.
+- Anyone who knows the URL can only **lock** your PC, nothing more. The app recognizes nothing but the exact text `lock`.
+- Messages older than 120 seconds are ignored (replay protection).
+- Messages pass through the third-party ntfy.sh server (over HTTPS). For more privacy, run your own ntfy server and change the `NTFY_SERVER` constant in `src/main.rs`.
+- If the URL leaks: delete `ntfy_topic.txt` and restart the app to get a new topic, then update the URL in your Shortcut.
 
-[src/main.rs](src/main.rs) başlığındakı sabitlər:
+## Configuration
 
-| Sabit | Mənası |
-|---|---|
-| `CORNER_PX` | Künc zonasının ölçüsü (piksel) |
-| `FAST_WINDOW_MS`, `FAST_MIN_DISTANCE_PX` | "Sürətli çırpma" şərti: küncə çatmazdan əvvəlki bu müddətdə bu qədər piksel qət edilməlidir |
-| `NTFY_SERVER` | ntfy serveri |
-| `NTFY_MAX_AGE_SECS` | Mesajın maksimum yaşı |
+Constants at the top of [src/main.rs](src/main.rs):
 
-Çoxmonitorlu sistemdə proqram yalnız **əsas monitorun** sağ aşağı küncünü izləyir.
+| Constant | Meaning |
+| --- | --- |
+| `CORNER_PX` | Size of the corner zone, in pixels |
+| `FAST_WINDOW_MS`, `FAST_MIN_DISTANCE_PX` | "Fast slam" rule: the cursor must travel at least this many pixels within this time window before reaching the corner |
+| `NTFY_SERVER` | ntfy server to use |
+| `NTFY_MAX_AGE_SECS` | Maximum accepted message age |
 
-## Niyə Bluetooth yoxdur?
+On multi-monitor setups only the bottom-right corner of the **primary monitor** is watched.
 
-iPhone Windows-a klassik Bluetooth ilə qoşulur və Windows klassik Bluetooth üçün siqnal gücü (məsafə) vermir. BLE reklamları isə adsızdır və ünvanı daim dəyişir. Ona görə yaxınlığa əsaslanan kilid etibarlı alınmadı və Shortcut yoluna keçildi.
+## Why no Bluetooth proximity lock?
+
+An iPhone connects to Windows over classic Bluetooth, and Windows exposes no signal strength (distance) for classic Bluetooth. Its BLE advertisements are anonymous and use constantly rotating addresses. A reliable proximity lock was not achievable, so the project uses the Shortcut approach instead.
